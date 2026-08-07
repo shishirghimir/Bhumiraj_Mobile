@@ -1,0 +1,31 @@
+# Build artefacts
+build/
+dist/
+*.spec.bak
+build_log.txt
+test_output.txt
+gui_all_out.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Shop data — never commit a live database or a customer's bills
+data/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Packaged releases (upload to GitHub Releases instead of the repo)
+*.zip
+
+# Editor / OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
