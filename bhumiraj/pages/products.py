@@ -273,9 +273,73 @@ class ProductsPage(Page):
                                    row["unit"] if editing else "pcs")
         serial_var = ctk.BooleanVar(
             value=bool(row["is_serialized"]) if editing else False)
-        ctk.CTkCheckBox(g3b[1], text="Track each unit by IMEI (phones)",
+        ctk.CTkCheckBox(g3b[1], text="Track each unit by IMEI",
                         variable=serial_var, font=ctk.CTkFont(size=F_SM),
-                        fg_color=TH.NAVY).pack(anchor="w", pady=22)
+                        fg_color=TH.NAVY,
+                        command=lambda: toggle_imei()).pack(anchor="w", pady=22)
+
+        # ── IMEI numbers, right here in the product form ────────────
+        # Not every phone is sold IMEI-tracked, so this whole block only
+        # appears when "Track each unit by IMEI" is ticked. Entering the
+        # numbers here means the shop never has to add the product and then
+        # go to the Mobiles tab to type the IMEIs a second time.
+        imei_box = ctk.CTkFrame(body, fg_color=TH.PANEL_ALT, corner_radius=10)
+        imei_pad = ctk.CTkFrame(imei_box, fg_color="transparent")
+        imei_pad.pack(fill="x", padx=12, pady=10)
+        ctk.CTkLabel(imei_pad, text="IMEI NUMBERS",
+                     font=ctk.CTkFont(size=F_TN, weight="bold"),
+                     text_color=TH.ACCENT).pack(anchor="w")
+        imei_help = ctk.CTkLabel(
+            imei_pad,
+            text="Type or scan ONE IMEI PER LINE — one line for each handset "
+                 "in the box.\nThe stock quantity is set automatically from "
+                 "how many you enter.",
+            font=ctk.CTkFont(size=F_TN), text_color=TH.TEXT_DIM,
+            justify="left")
+        imei_help.pack(anchor="w", pady=(2, 6))
+        e_imeis = ctk.CTkTextbox(imei_pad, height=110,
+                                 font=ctk.CTkFont(size=F_BODY),
+                                 fg_color=TH.PANEL, border_color=TH.BORDER,
+                                 border_width=1)
+        e_imeis.pack(fill="x")
+        imei_count = ctk.CTkLabel(imei_pad, text="0 handsets entered",
+                                  font=ctk.CTkFont(size=F_SM, weight="bold"),
+                                  text_color=TH.TEXT_DIM)
+        imei_count.pack(anchor="w", pady=(4, 0))
+
+        def read_imeis():
+            raw = e_imeis.get("1.0", "end").strip()
+            return [ln.strip() for ln in raw.splitlines() if ln.strip()]
+
+        def on_imei_type(_e=None):
+            n = len(read_imeis())
+            imei_count.configure(
+                text=f"{n} handset{'s' if n != 1 else ''} entered"
+                     + ("  →  stock will be set to " + str(n) if n else ""),
+                text_color=TH.POS if n else TH.TEXT_DIM)
+            if n:
+                e_qty.delete(0, "end")
+                e_qty.insert(0, str(n))
+        e_imeis.bind("<KeyRelease>", on_imei_type)
+
+        if editing:
+            existing_units = int(self.db.scalar(
+                "SELECT COUNT(*) FROM mobile_units WHERE product_id=?",
+                (row["id"],), 0))
+            if existing_units:
+                imei_help.configure(
+                    text=f"This product already has {existing_units} handset(s) "
+                         f"registered.\nAnything you type here is ADDED to "
+                         f"them — manage existing ones in the Mobiles tab.")
+
+        def toggle_imei():
+            if serial_var.get():
+                imei_box.pack(fill="x", pady=(8, 0))
+                e_qty.configure(state="disabled")
+            else:
+                imei_box.pack_forget()
+                e_qty.configure(state="normal")
+            on_imei_type()
 
         # ── dynamic per-kind fields ─────────────────────────────────
         ui.section(body, "Details")
@@ -307,8 +371,12 @@ class ProductsPage(Page):
                                                          options or [""], val)
                 else:
                     dyn_widgets[key] = ui.labelled_entry(col, label, val)
-            if kind == KIND_MOBILE and not serial_var.get():
+            # Picking a Mobile category turns IMEI tracking on and reveals the
+            # IMEI box straight away — but the shop can still untick it for a
+            # phone they don't want tracked unit-by-unit.
+            if kind == KIND_MOBILE and not editing and not serial_var.get():
                 serial_var.set(True)
+            toggle_imei()
         c_cat.configure(command=rebuild_dynamic)
         rebuild_dynamic()
 
@@ -403,10 +471,42 @@ class ProductsPage(Page):
                         "Save anyway?"):
                     return
 
-            qty = parse_int(e_qty.get())
+            # ── IMEIs typed into this form ──────────────────────────
+            imeis = read_imeis() if serial_var.get() else []
+            if imeis:
+                bad = [i for i in imeis
+                       if not i.isdigit() or not (10 <= len(i) <= 20)]
+                if bad:
+                    msg.configure(
+                        text="These IMEIs look wrong (digits only, 10–20 "
+                             "long): " + ", ".join(bad[:4]))
+                    return
+                if len(set(imeis)) != len(imeis):
+                    dupes = {i for i in imeis if imeis.count(i) > 1}
+                    msg.configure(text="The same IMEI is typed twice: "
+                                       + ", ".join(list(dupes)[:4]))
+                    return
+                taken = [i for i in imeis if self.db.fetchone(
+                    "SELECT 1 FROM mobile_units WHERE imei=?", (i,))]
+                if taken:
+                    msg.configure(
+                        text="Already registered to another handset: "
+                             + ", ".join(taken[:4]))
+                    return
+
+            qty = len(imeis) if imeis else parse_int(e_qty.get())
+            if editing and imeis:
+                qty = int(row["stock_quantity"]) + len(imeis)
             if qty < 0:
                 msg.configure(text="Stock quantity cannot be negative.")
                 return
+            if serial_var.get() and not editing and not imeis:
+                if not self.confirm(
+                        "No IMEI numbers",
+                        "IMEI tracking is on but you have not entered any IMEI "
+                        "numbers.\n\nSave the product with zero stock and add "
+                        "the handsets later?"):
+                    return
 
             attrs = pack_attrs({k: w.get() for k, w in dyn_widgets.items()})
             sku = e_sku.get().strip()
@@ -426,42 +526,67 @@ class ProductsPage(Page):
                       e_unit.get().strip() or "pcs",
                       parse_int(c_warr.get()), 1 if serial_var.get() else 0,
                       attrs, desc, state["image"])
+            colour = (dyn_widgets["color"].get().strip()
+                      if "color" in dyn_widgets else "")
+            storage = (dyn_widgets["storage"].get().strip()
+                       if "storage" in dyn_widgets else "")
+            ram = dyn_widgets["ram"].get().strip() if "ram" in dyn_widgets else ""
+
             try:
-                if editing:
-                    old_qty = int(row["stock_quantity"])
-                    self.db.execute(
-                        "UPDATE products SET name=?, category_id=?, sku=?, "
-                        " barcode=?, brand=?, model=?, cost_price=?, "
-                        " wholesale_price=?, sell_price=?, stock_quantity=?, "
-                        " min_stock_level=?, unit=?, warranty_months=?, "
-                        " is_serialized=?, attrs=?, description=?, "
-                        " image_path=?, updated_at=CURRENT_TIMESTAMP "
-                        "WHERE id=?", params + (row["id"],))
-                    if qty != old_qty:
-                        with self.db.transaction() as cur:
-                            from ..services import log_stock
-                            log_stock(cur, row["id"], "edit", qty - old_qty,
-                                      qty, "Edited in product form",
-                                      self.staff_id())
-                else:
-                    cur = self.db.execute(
-                        "INSERT INTO products (name, category_id, sku, barcode, "
-                        " brand, model, cost_price, wholesale_price, "
-                        " sell_price, stock_quantity, min_stock_level, unit, "
-                        " warranty_months, is_serialized, attrs, description, "
-                        " image_path) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                        params)
-                    with self.db.transaction() as c2:
-                        from ..services import log_stock
-                        log_stock(c2, cur.lastrowid, "opening", qty, qty,
+                from ..services import log_stock
+                # One transaction for the product AND its handsets, so a bad
+                # IMEI can never leave a product saved with half its units.
+                with self.db.transaction() as cur:
+                    if editing:
+                        old_qty = int(row["stock_quantity"])
+                        cur.execute(
+                            "UPDATE products SET name=?, category_id=?, sku=?, "
+                            " barcode=?, brand=?, model=?, cost_price=?, "
+                            " wholesale_price=?, sell_price=?, "
+                            " stock_quantity=?, min_stock_level=?, unit=?, "
+                            " warranty_months=?, is_serialized=?, attrs=?, "
+                            " description=?, image_path=?, "
+                            " updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                            params + (row["id"],))
+                        pid = row["id"]
+                        if qty != old_qty:
+                            log_stock(cur, pid, "edit", qty - old_qty, qty,
+                                      "Edited in product form", self.staff_id())
+                    else:
+                        cur.execute(
+                            "INSERT INTO products (name, category_id, sku, "
+                            " barcode, brand, model, cost_price, "
+                            " wholesale_price, sell_price, stock_quantity, "
+                            " min_stock_level, unit, warranty_months, "
+                            " is_serialized, attrs, description, image_path) "
+                            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                            params)
+                        pid = cur.lastrowid
+                        log_stock(cur, pid, "opening", qty, qty,
                                   "Product created", self.staff_id())
+
+                    for imei in imeis:
+                        cur.execute(
+                            "INSERT INTO mobile_units (product_id, imei, "
+                            " color, storage, ram, condition, cost_price, "
+                            " sell_price, status) "
+                            "VALUES (?,?,?,?,?,'New',?,?,'in_stock')",
+                            (pid, imei, colour, storage, ram, cost, retail))
+                    if imeis:
+                        log_stock(cur, pid, "imei_intake", len(imeis), qty,
+                                  f"{len(imeis)} handset(s) entered on the "
+                                  f"product form", self.staff_id())
             except Exception as exc:
                 msg.configure(text=f"Could not save: {exc}")
                 return
 
             d.destroy()
             self.refresh()
-            self.toast("Product saved." if editing else "Product added.")
+            if imeis:
+                self.toast(f"Product saved with {len(imeis)} handset(s) "
+                           f"registered.")
+            else:
+                self.toast("Product saved." if editing else "Product added.")
 
         foot = ui.modal_footer(d)
         if read_only:

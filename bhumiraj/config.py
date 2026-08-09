@@ -62,6 +62,7 @@ for _d in (DATA_DIR, BILLS_DIR, RECEIPTS_DIR, BACKUPS_DIR,
 
 DB_PATH = os.path.join(DATA_DIR, "bhumiraj.db")
 SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
+ERROR_LOG = os.path.join(DATA_DIR, "error_log.txt")
 
 LOGO_PATH = find_resource("logo.png")        # circular badge — sidebar / login
 LOGO_BILL = find_resource("logo_bill.png")   # flattened RGB — PDF header

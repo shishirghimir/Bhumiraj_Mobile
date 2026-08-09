@@ -16,8 +16,8 @@ from datetime import datetime
 
 import customtkinter as ctk
 
-from .config import (APP_NAME, APP_SHORT, APP_TAGLINE, APP_VERSION, F_BODY,
-                     F_LBL, F_SEC, F_SM, F_TN, LOGO_ICO, LOGO_PATH,
+from .config import (APP_NAME, APP_SHORT, APP_TAGLINE, APP_VERSION, ERROR_LOG,
+                     F_BODY, F_LBL, F_SEC, F_SM, F_TN, LOGO_ICO, LOGO_PATH,
                      ROLE_ADMIN, SHOP_ADDRESS, SHOP_PHONE, TH, VENDOR,
                      VENDOR_SITE)
 from .database import DatabaseManager
@@ -86,13 +86,39 @@ class BhumirajApp(ctk.CTk):
 
     # ── Crash guard ─────────────────────────────────────────────────
     def report_callback_exception(self, exc, val, tb):
-        """Never let a stray exception kill the till mid-sale."""
-        detail = "".join(traceback.format_exception(exc, val, tb))
-        sys.stderr.write(detail)
+        """Never let a stray exception kill the till mid-sale.
+
+        In a windowed PyInstaller build sys.stderr is None, so writing to it
+        raised inside the handler itself and turned a recoverable error into a
+        hard "Failed to execute script main" crash. Everything here is guarded
+        and the trace goes to a log file the shop can send us.
+        """
         try:
-            ui.error(self, "Unexpected error",
-                     f"{val}\n\nThe app is still running — your data is safe.\n"
-                     "If this keeps happening, take a backup and restart.")
+            detail = "".join(traceback.format_exception(exc, val, tb))
+        except Exception:
+            detail = f"{exc}: {val}"
+
+        # stderr may be None (windowed build) — never assume it exists
+        try:
+            if sys.stderr is not None:
+                sys.stderr.write(detail)
+                sys.stderr.flush()
+        except Exception:
+            pass
+
+        try:
+            with open(ERROR_LOG, "a", encoding="utf-8") as fh:
+                fh.write(f"\n===== {datetime.now():%Y-%m-%d %H:%M:%S} =====\n")
+                fh.write(detail)
+        except Exception:
+            pass
+
+        try:
+            ui.error(self, "Something went wrong",
+                     f"{val}\n\nThe app is still running and your data is "
+                     f"safe — you can carry on.\n\n"
+                     f"If it keeps happening, send this file to support:\n"
+                     f"{ERROR_LOG}")
         except Exception:
             pass
 

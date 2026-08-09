@@ -251,8 +251,8 @@ def style_trees():
         pass
     st.configure("Bh.Treeview",
                  background=TH.PANEL, fieldbackground=TH.PANEL,
-                 foreground=TH.TEXT, rowheight=30, borderwidth=0,
-                 font=("Segoe UI", 10))
+                 foreground=TH.TEXT, rowheight=34, borderwidth=0,
+                 font=("Segoe UI", 11))
     st.configure("Bh.Treeview.Heading",
                  background=TH.SIDEBAR, foreground=TH.ACCENT,
                  relief="flat", font=("Segoe UI", 10, "bold"))

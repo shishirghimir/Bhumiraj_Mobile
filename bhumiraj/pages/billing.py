@@ -431,19 +431,20 @@ class BillingPage(Page):
             return
 
         kind = row["cat_kind"]
-        if row["is_serialized"] or kind == KIND_MOBILE:
+        # Only IMEI-tracked products go through the handset picker. A phone
+        # the shop chose NOT to track sells like any other item.
+        if row["is_serialized"]:
             units = self.db.fetchall(
                 "SELECT * FROM mobile_units WHERE product_id=? "
                 "AND status='in_stock' ORDER BY id", (row["id"],))
             if units:
                 self._pick_handset(row, units)
                 return
-            if row["is_serialized"]:
-                self.warn("No handsets in stock",
-                          f"There are no unsold IMEI units for "
-                          f"{row['name']}.\n\nAdd them in the Mobiles tab "
-                          "first.")
-                return
+            self.warn("No handsets in stock",
+                      f"There are no unsold IMEI units for {row['name']}.\n\n"
+                      "Add the IMEI numbers on the product (Products → Edit) "
+                      "or in the Mobiles tab.")
+            return
 
         if kind != KIND_SERVICE and int(row["stock_quantity"]) <= 0:
             self.warn("Out of stock",
@@ -599,9 +600,12 @@ class BillingPage(Page):
                 self.warn("Already added",
                           f"IMEI {unit['imei']} is already on this bill.")
                 return
+            # Read EVERY widget before the dialog is destroyed — touching a
+            # widget after destroy() raises TclError "invalid command name".
+            warranty = parse_int(c_warr.get())
             d.destroy()
             self._push_item(product, 1, price, unit,
-                            parse_int(c_warr.get()), plan, down, months)
+                            warranty, plan, down, months)
 
         foot = ui.modal_footer(d)
         ui.button(foot, "Cancel", d.destroy, "muted", 110, side="right")
@@ -636,10 +640,11 @@ class BillingPage(Page):
         head = " ".join(p for p in (it["brand"], it["name"]) if p)
         if it["model"] and it["model"].lower() not in head.lower():
             head += f" — {it['model']}"
-        ctk.CTkLabel(top, text=head[:44],
-                     font=ctk.CTkFont(size=F_BODY, weight="bold"),
-                     text_color=TH.TEXT, anchor="w").pack(side="left",
-                                                          fill="x", expand=True)
+        ctk.CTkLabel(top, text=head[:40],
+                     font=ctk.CTkFont(size=F_LBL, weight="bold"),
+                     text_color=TH.TEXT, anchor="w",
+                     wraplength=330, justify="left").pack(
+                         side="left", fill="x", expand=True)
         ctk.CTkButton(top, text="✕", width=24, height=24,
                       fg_color=TH.DANGER, hover_color=TH.DANGER_HV,
                       font=ctk.CTkFont(size=F_TN, weight="bold"),
@@ -700,7 +705,7 @@ class BillingPage(Page):
         price_e.bind("<FocusOut>", lambda _e, i=idx: self._set_price(i))
 
         total_lbl = ctk.CTkLabel(row, text=f"{self.cur} {it['total_price']:,.2f}",
-                                 font=ctk.CTkFont(size=F_BODY, weight="bold"),
+                                 font=ctk.CTkFont(size=F_LBL, weight="bold"),
                                  text_color=TH.ACCENT)
         total_lbl.pack(side="right")
 

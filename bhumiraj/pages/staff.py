@@ -258,6 +258,9 @@ class StaffPage(Page):
                 msg.configure(text=f"Could not save: {exc}")
                 return
 
+            # `pw` was read above, while the dialog was still alive — never
+            # touch e_pw after destroy() or Tk raises "invalid command name".
+            new_password = "" if editing else pw
             d.destroy()
             self.refresh()
             if editing:
@@ -266,7 +269,7 @@ class StaffPage(Page):
                 self.info(
                     "Staff account created",
                     f"Username:  {user}\n"
-                    f"Temporary password:  {e_pw.get()}\n\n"
+                    f"Temporary password:  {new_password}\n\n"
                     "Give these to the staff member. They will be asked to set "
                     "their own password the first time they log in.")
 
