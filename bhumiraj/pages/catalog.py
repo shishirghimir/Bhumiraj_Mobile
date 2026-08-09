@@ -196,8 +196,6 @@ class CatalogPage(Page):
             msg = (f"Namaste,\n\nThis is *{shop}*.\n\n"
                    f"Here is our latest product catalog "
                    f"({len(rows)} items).\n\n"
-                   "The PDF is on your clipboard — press *Ctrl+V* here to "
-                   "attach it.\n\n"
                    f"For orders call {self.settings.get('shop_phone', '')}.\n"
                    "Thank you! 🙏")
             wa.send(self.app, phone, msg, path)

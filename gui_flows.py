@@ -159,6 +159,10 @@ def set_field(root, label, value):
             continue
         parent = w.master
         for sib in parent.winfo_children():
+            # a typeable dropdown (colour, quality, warranty…) is set by .set()
+            if isinstance(sib, ctk.CTkComboBox):
+                sib.set(str(value))
+                return sib
             if isinstance(sib, ctk.CTkEntry) and not isinstance(
                     getattr(sib, "master", None), ctk.CTkComboBox):
                 sib.configure(state="normal")
@@ -394,6 +398,26 @@ def main():
             check("Mobile category reveals the IMEI box",
                   any(isinstance(w, ctk.CTkTextbox) for w in walk(d)))
 
+            # the shop must always be able to type a stock quantity, even on
+            # an IMEI-tracked product
+            qty_box = None
+            for w in walk(d):
+                if isinstance(w, ctk.CTkLabel) and str(
+                        w.cget("text")).lower().startswith("stock quantity"):
+                    for sib in w.master.winfo_children():
+                        if isinstance(sib, ctk.CTkEntry):
+                            qty_box = sib
+                            break
+            check("stock quantity box exists", qty_box is not None)
+            if qty_box is not None:
+                check("stock quantity is NOT disabled",
+                      str(qty_box.cget("state")) == "normal",
+                      str(qty_box.cget("state")))
+                qty_box.delete(0, "end")
+                qty_box.insert(0, "7")
+                check("stock quantity accepts typing",
+                      qty_box.get() == "7", qty_box.get())
+
             set_field(d, "Product Name", "Galaxy M14")
             set_field(d, "Brand", "Samsung")
             set_field(d, "Model", "SM-M146B")
@@ -484,6 +508,244 @@ def main():
     check("no handset dialog appeared", top_dialog(app) is None)
     bill.cart = []
     bill._redraw_cart()
+    close_all(app)
+
+    # ── 4e. ONE-CLICK ADD + EDIT LINE ─────────────────────────────────
+    print("\n--- 4e. one-click add, double-click for phones, edit line "
+          + "-" * 17)
+    app.go("billing")
+    app.update()
+    bill = app._page_cache["billing"]
+    bill.cart = []
+    bill._redraw_cart()
+    app.update()
+
+    class FakeClick:
+        def __init__(self, y=10):
+            self.y = y
+
+    def click_row(iid):
+        """Drive the real click handler.
+
+        bbox() returns nothing while the test window is hidden, so pointing
+        identify_row at the row under test is what actually exercises the
+        click-routing logic instead of silently skipping it.
+        """
+        original = bill.results.identify_row
+        bill.results.identify_row = lambda _y: iid
+        try:
+            bill._on_result_click(FakeClick())
+        finally:
+            bill.results.identify_row = original
+
+    def double_row(iid):
+        original = bill.results.identify_row
+        bill.results.identify_row = lambda _y: iid
+        try:
+            bill._on_result_double(FakeClick())
+        finally:
+            bill.results.identify_row = original
+
+    bill.search_entry.delete(0, "end")
+    bill.search_entry.insert(0, "a")
+    bill._search()
+    app.update()
+    rows = bill.results.get_children()
+    check(f"typing fills the results dropdown ({len(rows)})", len(rows) > 0)
+
+    normal_iid = phone_iid = None
+    for iid in rows:
+        r = bill._rows.get(iid)
+        if r is None:
+            continue
+        if r["is_serialized"] and phone_iid is None:
+            phone_iid = iid
+        elif not r["is_serialized"] and normal_iid is None:
+            normal_iid = iid
+    check("a normal product is in the results", normal_iid is not None)
+    check("an IMEI phone is in the results", phone_iid is not None)
+
+    if normal_iid:
+        guard(app, "single click a normal product",
+              lambda: click_row(normal_iid))
+        check("ONE CLICK added a normal product to the bill",
+              len(bill.cart) == 1, f"cart={len(bill.cart)}")
+
+    if phone_iid:
+        before = len(bill.cart)
+        guard(app, "single click an IMEI phone", lambda: click_row(phone_iid))
+        check("single click on a phone does NOT add it",
+              len(bill.cart) == before, f"cart={len(bill.cart)}")
+        check("hint tells the user to double-click",
+              "double-click" in bill.drop_head.cget("text").lower())
+        guard(app, "double click an IMEI phone", lambda: double_row(phone_iid))
+        check("double click opens the handset picker",
+              top_dialog(app) is not None)
+        close_all(app)
+
+    # edit a bill line: model + quality must change what prints
+    if bill.cart:
+        if guard(app, "edit-line dialog opens", lambda: bill._edit_line(0)):
+            d = top_dialog(app)
+            if d:
+                set_field(d, "Model", "EDITED-MODEL-9")
+                set_field(d, "Quality / Grade", "A+ Copy")
+                app.update()
+                if guard(app, "Save line click",
+                         lambda: click(app, d, "save line")):
+                    check("model changed on the bill line",
+                          bill.cart[0]["model"] == "EDITED-MODEL-9",
+                          bill.cart[0]["model"])
+                    check("quality changed on the bill line",
+                          bill.cart[0]["quality"] == "A+ Copy",
+                          bill.cart[0].get("quality"))
+                    bill._apply_cell(0, "#7", "1234")
+                    check("price changed inline and total recalculated",
+                          bill.cart[0]["unit_price"] == 1234.0
+                          and bill.cart[0]["total_price"]
+                          == money(1234.0 * bill.cart[0]["quantity"]),
+                          str(bill.cart[0]["total_price"]))
+        close_all(app)
+
+        # and it must reach the saved bill + the PDF
+        bill._pay_full()
+        bill._success_dialog = lambda *a, **k: None
+        if guard(app, "save the edited bill", lambda: bill._save("none")):
+            item = app.db.fetchone(
+                "SELECT * FROM bill_items ORDER BY id DESC LIMIT 1")
+            check("edited model stored on the bill item",
+                  item and item["product_model"] == "EDITED-MODEL-9",
+                  item["product_model"] if item else "no row")
+            from bhumiraj.services import unpack_attrs
+            snap = unpack_attrs(item["attrs_snapshot"]) if item else {}
+            check("edited quality stored in the bill snapshot",
+                  snap.get("quality") == "A+ Copy", str(snap))
+    close_all(app)
+    bill.cart = []
+    bill._redraw_cart()
+
+    # ── 4f. SAVE WHILE A CART FIELD HAS FOCUS (the third crash) ───────
+    print("\n--- 4f. save while a price box has focus " + "-" * 34)
+    app.go("billing")
+    app.update()
+    bill = app._page_cache["billing"]
+    bill.cart = []
+    bill._redraw_cart()
+    app.update()
+
+    cheap = app.db.fetchone(
+        "SELECT p.*, c.kind AS cat_kind FROM products p "
+        "JOIN categories c ON p.category_id=c.id "
+        "WHERE p.is_serialized=0 AND p.stock_quantity>2 LIMIT 1")
+    bill._push_item(cheap, 2, 100.0)
+    app.update()
+
+    # Inline cell editing must survive the editor being torn down mid-edit
+    # (that is the shape of the crash the shop hit).
+    check("bill line is on the table", len(bill._line_iids) == 1)
+
+    # Actually CREATE the inline editor — calling _apply_cell alone never
+    # builds the widget, which is how the CustomTkinter place() crash shipped.
+    ed = None
+    def open_qty_editor():
+        nonlocal ed
+        ed = bill._open_cell_editor(0, "#6", 10, 10, 62, 30)
+    guard(app, "inline qty editor opens", open_qty_editor)
+    check("inline editor widget created", ed is not None)
+    if ed is not None:
+        check("editor shows the current qty", ed.get() == str(bill.cart[0]["quantity"]),
+              ed.get())
+        ed.delete(0, "end")
+        ed.insert(0, "5")
+        guard(app, "commit the inline edit", ed._commit)
+        app.update()
+        check("typing in the inline editor updates the line",
+              bill.cart[0]["quantity"] == 5, str(bill.cart[0]["quantity"]))
+        check("editor closed after commit", bill._cell_editor is None)
+
+    ed2 = None
+    def open_rate_editor():
+        nonlocal ed2
+        ed2 = bill._open_cell_editor(0, "#7", 10, 10, 100, 30)
+    guard(app, "inline rate editor opens", open_rate_editor)
+    if ed2 is not None:
+        ed2.delete(0, "end")
+        ed2.insert(0, "175.50")
+        guard(app, "commit the rate edit", ed2._commit)
+        app.update()
+        check("inline rate edit applied", bill.cart[0]["unit_price"] == 175.50,
+              str(bill.cart[0]["unit_price"]))
+        check("amount recalculated from inline edits",
+              bill.cart[0]["total_price"] == money(175.50 * bill.cart[0]["quantity"]),
+              str(bill.cart[0]["total_price"]))
+    guard(app, "editor on a vanished line is safe",
+          lambda: bill._open_cell_editor(99, "#6", 0, 0, 50, 20))
+
+    # the side edit bar: select a line, type into the boxes, press Update
+    bill.items.selection_set(bill._line_iids[0])
+    guard(app, "selecting a line loads the edit boxes", bill._on_line_select)
+    check("edit boxes show the selected line",
+          bill.ed_qty.get() == str(bill.cart[0]["quantity"]),
+          bill.ed_qty.get())
+    bill.ed_qty.delete(0, "end"); bill.ed_qty.insert(0, "3")
+    bill.ed_price.delete(0, "end"); bill.ed_price.insert(0, "99.50")
+    guard(app, "Update applies the edit boxes", bill._apply_line)
+    check("qty applied from the edit bar", bill.cart[0]["quantity"] == 3,
+          str(bill.cart[0]["quantity"]))
+    check("price applied from the edit bar",
+          bill.cart[0]["unit_price"] == 99.50, str(bill.cart[0]["unit_price"]))
+    check("amount recalculated from the edit bar",
+          bill.cart[0]["total_price"] == 298.50,
+          str(bill.cart[0]["total_price"]))
+    guard(app, "Update with nothing selected is safe",
+          lambda: (bill.items.selection_remove(*bill.items.selection()),
+                   bill._apply_line()))
+    guard(app, "apply a qty typed inline",
+          lambda: bill._apply_cell(0, "#6", "4"))
+    check("inline qty edit applied",
+          bill.cart and bill.cart[0]["quantity"] == 4,
+          str(bill.cart[0]["quantity"]) if bill.cart else "no line")
+    guard(app, "apply a rate typed inline",
+          lambda: bill._apply_cell(0, "#7", "250"))
+    check("inline rate edit applied",
+          bill.cart[0]["unit_price"] == 250.0, str(bill.cart[0]["unit_price"]))
+    check("line total recalculated",
+          bill.cart[0]["total_price"] == 1000.0,
+          str(bill.cart[0]["total_price"]))
+    guard(app, "apply an edit to a line that is gone",
+          lambda: bill._apply_cell(99, "#6", "3"))
+    check("editing a vanished line is handled safely", True)
+    guard(app, "kill a stale cell editor twice", bill._kill_editor)
+    check("closing the inline editor twice is safe", True)
+
+    # and the full save path with a line still on the bill
+    bill.cart = []
+    bill._redraw_cart()
+    bill._push_item(cheap, 2, 100.0)
+    app.update()
+    app.update()
+    bill._pay_full()
+    app.update()
+    bill._success_dialog = lambda *a, **k: None
+    before = app.db.scalar("SELECT COUNT(*) FROM bills", None, 0)
+    ok = guard(app, "COMPLETE BILL with focus in the price box",
+               lambda: bill._save("none"))
+    check("no crash saving while a row is focused", ok)
+    check("bill still saved",
+          app.db.scalar("SELECT COUNT(*) FROM bills", None, 0) == before + 1)
+    check("cart cleared cleanly", len(bill.cart) == 0)
+    check("no stale inline editor left behind",
+          bill._cell_editor is None)
+
+    # rapid add / remove / clear must not leave dead widgets behind either
+    for _ in range(3):
+        bill._push_item(cheap, 1, 100.0)
+    app.update()
+    app.update()
+    guard(app, "remove a line while its box has focus",
+          lambda: bill._remove(0))
+    guard(app, "clear the bill while a box has focus", bill._clear_cart)
+    check("clear left an empty cart", len(bill.cart) == 0)
     close_all(app)
 
     # ── 5. ADD A STAFF ACCOUNT (the second crash) ─────────────────────

@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import customtkinter as ctk
 
-from ..config import (CONDITION_OPTS, F_BODY, F_LBL, F_SM, F_TN, KIND_MOBILE,
-                      RAM_OPTS, STORAGE_OPTS, TH)
+from ..config import (COLOR_OPTS, CONDITION_OPTS, F_BODY, F_LBL, F_SM, F_TN,
+                      KIND_MOBILE, RAM_OPTS, STORAGE_OPTS, TH)
 from ..services import (log_stock, money, parse_amount, unpack_attrs)
 from .. import ui_helpers as ui
 from .base import Page
@@ -199,7 +199,7 @@ class MobilesPage(Page):
                                     row["imei2"] if editing else "")
         e_serial = ui.labelled_entry(g[0], "Serial No.",
                                      row["serial_no"] if editing else "")
-        e_color = ui.labelled_entry(g[1], "Colour",
+        e_color = ui.labelled_combo(g[1], "Colour", COLOR_OPTS,
                                     row["color"] if editing else "",
                                     required=True)
         c_storage = ui.labelled_combo(g[0], "Storage", STORAGE_OPTS,

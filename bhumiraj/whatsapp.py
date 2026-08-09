@@ -201,8 +201,6 @@ def bill_message(shop_name, shop_phone, bill_number, total, customer_name="",
         lines.append(f"⏳ *Balance Due: {currency} {due:,.2f}*")
     lines += [
         "",
-        "The PDF bill is on your clipboard — press *Ctrl+V* here to attach it.",
-        "",
         f"For any queries call us at {shop_phone}.",
         "Thank you for your business! 🙏",
     ]
@@ -225,8 +223,6 @@ def receipt_message(shop_name, shop_phone, receipt_number, amount, customer_name
         lines.append("🎉 *Your account is fully settled. Thank you!*")
     lines += [
         "",
-        "The PDF receipt is on your clipboard — press *Ctrl+V* here to attach it.",
-        "",
         f"For any queries call us at {shop_phone}.",
         "Thank you! 🙏",
     ]
@@ -240,8 +236,6 @@ def statement_message(shop_name, shop_phone, retailer_name, date_from, date_to,
         f"This is *{shop_name}*.", "",
         f"Statement of account for *{date_from}* to *{date_to}*:",
         f"💼 *Closing Balance: {currency} {closing_due:,.2f}*", "",
-        "The PDF statement is on your clipboard — press *Ctrl+V* here to attach it.",
-        "",
         f"For any queries call us at {shop_phone}.",
         "Thank you! 🙏",
     ])

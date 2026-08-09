@@ -251,10 +251,17 @@ def main():
     app.update()
     billing = app._page_cache.get("billing")
     try:
+        # the results dropdown stays hidden until the user types
+        check("results dropdown starts hidden",
+              len(billing.results.get_children()) == 0)
+        billing.search_entry.insert(0, "a")
+        billing._search()
+        app.update()
         n_rows = len(billing.results.get_children())
-        check(f"billing search lists products ({n_rows} rows)", n_rows >= 5)
+        check(f"typing shows matching products ({n_rows} rows)", n_rows >= 3)
+        billing.search_entry.delete(0, "end")
         billing.search_entry.insert(0, "samsung")
-        billing._refresh_results()
+        billing._search()
         app.update()
         check("search narrows results",
               0 < len(billing.results.get_children()) < n_rows)

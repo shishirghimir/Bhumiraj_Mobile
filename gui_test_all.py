@@ -317,11 +317,12 @@ def main():
             app.update()
             check("STAFF can set the price on a retail bill line",
                   bill.cart and bill.cart[0]["unit_price"] == 999.0)
-            bill._bump(0, 1)
+            bill._apply_cell(0, "#6", "3")
             app.update()
             check("STAFF can change the quantity on a bill line",
                   bill.cart[0]["quantity"] == 3
-                  and bill.cart[0]["total_price"] == 2997.0)
+                  and bill.cart[0]["total_price"] == 2997.0,
+                  str(bill.cart[0]["total_price"]))
             # switching type with items in the cart must ASK first
             from bhumiraj.config import BILL_RETAIL, BILL_WHOLESALE
             ANSWER_YES["value"] = False
@@ -358,6 +359,17 @@ def main():
     ANSWER_YES["value"] = False
 
     # ── the app must still be healthy after all that clicking ─────────
+    # ── ANY exception Tk swallowed during the storm is now on disk ────
+    print("\n--- swallowed GUI errors " + "-" * 50)
+    from bhumiraj.config import ERROR_LOG
+    if os.path.exists(ERROR_LOG):
+        body = open(ERROR_LOG, encoding="utf-8", errors="replace").read()
+        blocks = [b for b in body.split("=====") if "Traceback" in b]
+        check(f"no GUI exception logged ({len(blocks)} traceback(s) found)",
+              False, body[-1200:])
+    else:
+        check("no GUI exception logged during the whole click storm", True)
+
     print("\n--- integrity after the click storm " + "-" * 39)
     try:
         row = app.db.fetchone("PRAGMA integrity_check")

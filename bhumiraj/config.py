@@ -176,6 +176,12 @@ KIND_LABELS = {
     KIND_GENERAL: "General",
 }
 
+# Common colours offered as a dropdown — the box is still typeable, so any
+# colour not on this list can simply be typed in.
+COLOR_OPTS = ["", "Black", "White", "Blue", "Silver", "Grey", "Gold",
+              "Green", "Red", "Purple", "Rose Gold", "Titanium",
+              "Midnight Black", "Navy Blue"]
+
 STORAGE_OPTS = ["", "8GB", "16GB", "32GB", "64GB", "128GB", "256GB", "512GB", "1TB"]
 RAM_OPTS = ["", "1GB", "2GB", "3GB", "4GB", "6GB", "8GB", "12GB", "16GB"]
 NETWORK_OPTS = ["", "2G", "3G", "4G", "4G VoLTE", "5G"]
@@ -201,7 +207,7 @@ WARRANTY_OPTS = ["0", "1", "3", "6", "12", "18", "24", "36"]
 # Fields stored in the `attrs` JSON column, per category kind.
 KIND_FIELDS = {
     KIND_MOBILE: [
-        ("color",       "Colour",            "text",  None),
+        ("color",       "Colour",            "combo", COLOR_OPTS),
         ("storage",     "Storage",           "combo", STORAGE_OPTS),
         ("ram",         "RAM",               "combo", RAM_OPTS),
         ("network",     "Network",           "combo", NETWORK_OPTS),
@@ -210,7 +216,7 @@ KIND_FIELDS = {
         ("box_items",   "Box Contents",      "text",  None),
     ],
     KIND_WATCH: [
-        ("color",       "Dial Colour",       "text",  None),
+        ("color",       "Dial Colour",       "combo", COLOR_OPTS),
         ("movement",    "Movement",          "combo", MOVEMENT_OPTS),
         ("strap",       "Strap Material",    "combo", STRAP_OPTS),
         ("dial_size",   "Dial Size (mm)",    "text",  None),
@@ -218,14 +224,14 @@ KIND_FIELDS = {
         ("gender",      "For",               "combo", ["", "Men", "Women", "Unisex", "Kids"]),
     ],
     KIND_ACCESSORY: [
-        ("color",       "Colour",            "text",  None),
+        ("color",       "Colour",            "combo", COLOR_OPTS),
         ("connector",   "Connector Type",    "combo", CONNECTOR_OPTS),
         ("wattage",     "Wattage / Capacity", "text", None),
         ("compat",      "Compatibility",     "combo", COMPATIBILITY_OPTS),
         ("quality",     "Quality Grade",     "combo", QUALITY_OPTS),
     ],
     KIND_EYEWEAR: [
-        ("color",       "Frame Colour",      "text",  None),
+        ("color",       "Frame Colour",      "combo", COLOR_OPTS),
         ("frame",       "Frame Material",    "combo", FRAME_OPTS),
         ("lens",        "Lens Type",         "combo", LENS_OPTS),
         ("power",       "Power / Number",    "text",  None),
@@ -236,7 +242,7 @@ KIND_FIELDS = {
         ("technician",  "Default Technician", "text", None),
     ],
     KIND_GENERAL: [
-        ("color",       "Colour",            "text",  None),
+        ("color",       "Colour",            "combo", COLOR_OPTS),
         ("variant_note", "Variant / Note",   "text",  None),
     ],
 }

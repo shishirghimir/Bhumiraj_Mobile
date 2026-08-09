@@ -29,3 +29,7 @@ data/
 .idea/
 Thumbs.db
 desktop.ini
+
+# scratch
+_shot*.py
+flowout.txt

@@ -158,10 +158,10 @@ def stat_card(parent, title, value, color=None, width=192, click=None,
                      text_color=TH.TEXT_DIM).pack(anchor="w")
     if click:
         for w in (card, inner, strip):
-            w.bind("<Button-1>", lambda _e: click())
+            w.bind("<Button-1>", lambda _e=None: click())
             w.configure(cursor="hand2")
         for child in inner.winfo_children():
-            child.bind("<Button-1>", lambda _e: click())
+            child.bind("<Button-1>", lambda _e=None: click())
     return card
 
 
@@ -253,6 +253,16 @@ def style_trees():
                  background=TH.PANEL, fieldbackground=TH.PANEL,
                  foreground=TH.TEXT, rowheight=34, borderwidth=0,
                  font=("Segoe UI", 11))
+    st.configure("BhBig.Treeview",
+                 background=TH.PANEL, fieldbackground=TH.PANEL,
+                 foreground=TH.TEXT, rowheight=42, borderwidth=0,
+                 font=("Segoe UI", 12))
+    st.configure("BhBig.Treeview.Heading",
+                 background=TH.SIDEBAR, foreground=TH.ACCENT,
+                 relief="flat", font=("Segoe UI", 11, "bold"))
+    st.map("BhBig.Treeview",
+           background=[("selected", TH.SIDEBAR_HL)],
+           foreground=[("selected", "white")])
     st.configure("Bh.Treeview.Heading",
                  background=TH.SIDEBAR, foreground=TH.ACCENT,
                  relief="flat", font=("Segoe UI", 10, "bold"))
@@ -267,7 +277,7 @@ def style_trees():
 
 
 def make_table(parent, columns, widths=None, anchors=None, height=14,
-               on_double=None, on_select=None):
+               on_double=None, on_select=None, big=False):
     """Treeview + vertical & horizontal scrollbars in a bordered frame.
 
     Returns (tree, container_frame). Rows are never clipped — the frame
@@ -283,7 +293,8 @@ def make_table(parent, columns, widths=None, anchors=None, height=14,
     inner.pack(fill="both", expand=True, padx=6, pady=6)
 
     tree = ttk.Treeview(inner, columns=columns, show="headings",
-                        height=height, style="Bh.Treeview")
+                        height=height,
+                        style="BhBig.Treeview" if big else "Bh.Treeview")
     vsb = ttk.Scrollbar(inner, orient="vertical", command=tree.yview)
     hsb = ttk.Scrollbar(inner, orient="horizontal", command=tree.xview)
     tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
@@ -529,6 +540,7 @@ class FilterChips(ctk.CTkFrame):
 
         row = col = 0
         used = 0
+        widest = 0
         for label, b in self.buttons.items():
             w = self._widths[label]
             if used + w > avail and col > 0:
@@ -538,11 +550,14 @@ class FilterChips(ctk.CTkFrame):
             b.grid(row=row, column=col, padx=3, pady=3, sticky="w")
             used += w
             col += 1
+            widest = max(widest, used)
 
-        # Lock the height to the rows actually used so the frame never demands
-        # more width than the parent can give.
+        # Size the frame to what was actually laid out. Height alone is not
+        # enough: when the chips are packed inline (side="left") the frame
+        # keeps its placeholder width and the last chips get clipped.
         self.grid_propagate(False)
-        self.configure(height=(row + 1) * 36)
+        self.configure(height=(row + 1) * 36,
+                       width=max(min(widest, avail), 60))
 
     def select(self, value):
         self.value = value

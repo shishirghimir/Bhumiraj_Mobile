@@ -333,12 +333,18 @@ class ProductsPage(Page):
                          f"them — manage existing ones in the Mobiles tab.")
 
         def toggle_imei():
+            # Stock quantity stays editable at ALL times. It is auto-filled
+            # from the IMEI count as a convenience, but the shop must always
+            # be able to click into it and type — disabling it was confusing.
             if serial_var.get():
                 imei_box.pack(fill="x", pady=(8, 0))
-                e_qty.configure(state="disabled")
             else:
                 imei_box.pack_forget()
+            # belt and braces: this box must always accept typing
+            try:
                 e_qty.configure(state="normal")
+            except Exception:
+                pass
             on_imei_type()
 
         # ── dynamic per-kind fields ─────────────────────────────────
