@@ -317,7 +317,7 @@ def main():
             app.update()
             check("STAFF can set the price on a retail bill line",
                   bill.cart and bill.cart[0]["unit_price"] == 999.0)
-            bill._apply_cell(0, "#6", "3")
+            bill._step(0, 1)
             app.update()
             check("STAFF can change the quantity on a bill line",
                   bill.cart[0]["quantity"] == 3

@@ -4,7 +4,8 @@ Layout follows the IOS Nepal billing screen the shop already knows:
   • the search box drops its results DOWN underneath it and collapses again
     when empty, instead of a product table permanently filling the screen
   • the BILL ITEMS table is the main area — full width, every detail visible
-  • Qty and Rate are edited IN PLACE: double-click the cell, type, press Enter
+  • every line is real widgets — a qty stepper, a price box and a delete
+    button — so quantity and price are always directly editable
 """
 from __future__ import annotations
 
@@ -40,9 +41,6 @@ CHIPS = [
 ]
 
 MAX_DROP_ROWS = 7
-COL_QTY = "#6"
-COL_RATE = "#7"
-COL_DELETE = "#9"
 
 
 class BillingPage(Page):
@@ -56,8 +54,7 @@ class BillingPage(Page):
         self.retailer_id = None
         self._chip_sql = None
         self._rows = {}
-        self._line_iids = []
-        self._cell_editor = None
+        self._rows_ui = []
 
         outer = self.body()
 
@@ -177,7 +174,7 @@ class BillingPage(Page):
                      font=ctk.CTkFont(size=F_LBL, weight="bold"),
                      text_color=TH.ACCENT).pack(side="left")
         ctk.CTkLabel(head,
-                     text="   double-click Qty or Rate to change it",
+                     text="   change Qty and Price directly on each line",
                      font=ctk.CTkFont(size=F_SM),
                      text_color=TH.TEXT_DIM).pack(side="left")
         self.item_count = ctk.CTkLabel(head, text="0 items",
@@ -185,58 +182,34 @@ class BillingPage(Page):
                                        text_color=TH.TEXT_DIM)
         self.item_count.pack(side="right")
 
-        # ── edit bar for the selected line ──────────────────────────
-        editbar = ctk.CTkFrame(parent, fg_color=TH.PANEL, corner_radius=8,
-                               border_width=1, border_color=TH.NAVY)
-        editbar.pack(side="bottom", fill="x", pady=(6, 0))
-        pad = ctk.CTkFrame(editbar, fg_color="transparent")
-        pad.pack(fill="x", padx=10, pady=8)
-        self.sel_lbl = ctk.CTkLabel(
-            pad, text="Select a line to change its quantity or price",
-            font=ctk.CTkFont(size=F_SM, weight="bold"),
-            text_color=TH.TEXT_DIM, anchor="w")
-        self.sel_lbl.pack(side="left", padx=(0, 12))
-
-        ui.button(pad, "🗑  Delete", self._remove_selected, "danger", 104, 34,
-                  side="right")
-        ui.button(pad, "✎  Details", self._edit_selected_line, "info", 104, 34,
-                  side="right", padx=(6, 0))
-        ui.button(pad, "✔  Update", self._apply_line, "ok", 106, 34,
-                  side="right", padx=(6, 0))
-        self.ed_price = ctk.CTkEntry(pad, width=104, height=34,
-                                     justify="right",
-                                     font=ctk.CTkFont(size=F_BODY),
-                                     fg_color=TH.PANEL_ALT,
-                                     border_color=TH.BORDER)
-        self.ed_price.pack(side="right", padx=(4, 8))
-        ctk.CTkLabel(pad, text="Price", font=ctk.CTkFont(size=F_SM,
-                     weight="bold"), text_color=TH.TEXT_DIM).pack(side="right")
-        self.ed_qty = ctk.CTkEntry(pad, width=64, height=34, justify="center",
-                                   font=ctk.CTkFont(size=F_BODY),
-                                   fg_color=TH.PANEL_ALT,
-                                   border_color=TH.BORDER)
-        self.ed_qty.pack(side="right", padx=(4, 12))
-        ctk.CTkLabel(pad, text="Qty", font=ctk.CTkFont(size=F_SM,
-                     weight="bold"), text_color=TH.TEXT_DIM).pack(side="right")
-        self.ed_qty.bind("<Return>", lambda _e: self._apply_line())
-        self.ed_price.bind("<Return>", lambda _e: self._apply_line())
+        # Column headings above the editable rows
+        hdr = ctk.CTkFrame(parent, fg_color=TH.SIDEBAR, corner_radius=6,
+                           height=32)
+        hdr.pack(fill="x")
+        hdr.pack_propagate(False)
+        hp = ctk.CTkFrame(hdr, fg_color="transparent")
+        hp.pack(fill="both", expand=True, padx=10)
+        # widths line up with the controls on each row below
+        ctk.CTkLabel(hp, text="ITEM", anchor="w",
+                     font=ctk.CTkFont(size=F_TN, weight="bold"),
+                     text_color=TH.ACCENT).pack(side="left", padx=(28, 0))
+        for text, width in (("", 42), ("AMOUNT", 120), ("PRICE", 118),
+                            ("QTY", 126)):
+            ctk.CTkLabel(hp, text=text, width=width, anchor="e",
+                         font=ctk.CTkFont(size=F_TN, weight="bold"),
+                         text_color=TH.ACCENT).pack(side="right")
 
         actions = ctk.CTkFrame(parent, fg_color="transparent")
         actions.pack(side="bottom", fill="x", pady=(6, 0))
         ui.button(actions, "Clear whole bill", self._clear_cart, "muted", 140,
                   30, side="right", font_size=F_SM)
 
-        self.items, _ = ui.make_table(
-            parent, ("#", "Product", "Brand", "Model", "Quality / IMEI",
-                     "Qty", "Rate", "Amount", "✕"),
-            widths=[34, 200, 104, 122, 214, 62, 98, 112, 34],
-            anchors=["center", "w", "w", "w", "w", "center", "e", "e",
-                     "center"],
-            height=10, big=True)
-        self.items.bind("<Double-1>", self._on_item_double)
-        self.items.bind("<ButtonRelease-1>", self._on_item_click)
-        self.items.bind("<<TreeviewSelect>>", lambda _e: self._on_line_select())
-        self.items.bind("<Delete>", lambda _e: self._remove_selected())
+        # Every line is real widgets — a stepper, a price box and a delete
+        # button — so quantity and price are always directly editable and the
+        # totals move as you type. No cell overlays, no double-click needed.
+        self.lines_box = ctk.CTkScrollableFrame(parent, fg_color=TH.PANEL,
+                                                corner_radius=8)
+        self.lines_box.pack(fill="both", expand=True, pady=(2, 0))
 
     # ── search ──────────────────────────────────────────────────────
     def _on_chip(self, label):
@@ -564,199 +537,190 @@ class BillingPage(Page):
     # BILL ITEMS TABLE
     # ══════════════════════════════════════════════════════════════
     def _redraw_cart(self):
-        self._kill_editor()
-        for iid in self.items.get_children():
-            self.items.delete(iid)
-        self._line_iids = []
+        """Rebuild every bill line as real, directly-editable widgets."""
+        # Clear the widget map BEFORE destroying, so any callback that fires
+        # during teardown cannot reach a half-destroyed row.
+        self._rows_ui = []
+        for w in self.lines_box.winfo_children():
+            w.destroy()
 
-        for i, it in enumerate(self.cart, 1):
-            extra = []
-            if it.get("quality"):
-                extra.append(it["quality"])
-            if it["imei"]:
-                extra.append(f"IMEI {it['imei']}")
-            summary = attrs_summary(unpack_attrs(it["attrs"]), limit=3)
-            if summary:
-                extra.append(summary)
-            if it["warranty_months"]:
-                extra.append(f"{it['warranty_months']}m warranty")
-            if it["plan"] == PLAN_INSTALLMENT:
-                extra.append(f"EMI × {it['months']}m")
-            iid = self.items.insert("", "end", values=(
-                i, it["name"], it["brand"] or "—", it["model"] or "—",
-                "  ·  ".join(extra) or "—", it["quantity"],
-                f"{it['unit_price']:,.2f}", f"{it['total_price']:,.2f}",
-                "✕"))
-            self._line_iids.append(iid)
+        if not self.cart:
+            ctk.CTkLabel(self.lines_box,
+                         text="\n\nNo items yet.\n\n"
+                              "Search above and click a product to add it.",
+                         font=ctk.CTkFont(size=F_BODY),
+                         text_color=TH.TEXT_DIM,
+                         justify="center").pack(pady=40)
+        for idx, it in enumerate(self.cart):
+            self._rows_ui.append(self._build_line(idx, it))
 
         n = len(self.cart)
         self.item_count.configure(text=f"{n} item{'s' if n != 1 else ''}")
         self._recalc()
 
-    def _index_of(self, iid):
-        try:
-            return self._line_iids.index(iid)
-        except ValueError:
-            return None
+    def _build_line(self, idx, it):
+        """One bill line: description, qty stepper, price box, amount, delete."""
+        card = ctk.CTkFrame(self.lines_box, fg_color=TH.PANEL_ALT,
+                            corner_radius=8)
+        card.pack(fill="x", padx=4, pady=3)
+        row = ctk.CTkFrame(card, fg_color="transparent")
+        row.pack(fill="x", padx=10, pady=8)
 
-    def _on_line_select(self):
-        """Load the selected line into the edit boxes."""
-        idx = self._selected_index()
-        if idx is None or idx >= len(self.cart):
-            self.sel_lbl.configure(
-                text="Select a line to change its quantity or price",
-                text_color=TH.TEXT_DIM)
-            return
-        it = self.cart[idx]
-        self.ed_qty.delete(0, "end")
-        self.ed_qty.insert(0, str(it["quantity"]))
-        self.ed_price.delete(0, "end")
-        self.ed_price.insert(0, f"{it['unit_price']:.2f}")
-        label = " ".join(x for x in (it["brand"], it["name"]) if x)
-        self.sel_lbl.configure(text=f"Editing:  {label[:34]}",
-                               text_color=TH.ACCENT)
+        ctk.CTkLabel(row, text=str(idx + 1), width=24,
+                     font=ctk.CTkFont(size=F_SM, weight="bold"),
+                     text_color=TH.TEXT_DIM).pack(side="left")
 
-    def _apply_line(self):
-        """Apply the qty / price boxes to the selected line."""
-        idx = self._selected_index()
-        if idx is None or idx >= len(self.cart):
-            self.toast("Select a line on the bill first.", "warn")
-            return
-        it = self.cart[idx]
-        qty = 1 if it["mobile_unit_id"] else max(
-            parse_int(self.ed_qty.get(), it["quantity"]), 1)
-        stock = self._stock_for(it)
-        if stock is not None and qty > stock:
-            qty = max(int(stock), 1)
-            self.toast(f"Only {stock} of {it['name']} in stock.", "warn")
-        price = max(parse_amount(self.ed_price.get(), it["unit_price"]), 0.0)
-        it["quantity"] = qty
-        it["unit_price"] = price
-        it["total_price"] = money(qty * price)
-        self._redraw_cart()
-        if idx < len(self._line_iids):
-            self.items.selection_set(self._line_iids[idx])
-        self.toast("Line updated.")
+        # right-hand controls are packed first so they keep their width
+        ctk.CTkButton(row, text="🗑", width=34, height=34,
+                      fg_color=TH.DANGER, hover_color=TH.DANGER_HV,
+                      font=ctk.CTkFont(size=F_BODY),
+                      command=lambda i=idx: self._remove(i)).pack(
+                          side="right", padx=(8, 0))
+        total_lbl = ctk.CTkLabel(row,
+                                 text=f"{self.cur} {it['total_price']:,.2f}",
+                                 width=120, anchor="e",
+                                 font=ctk.CTkFont(size=F_LBL, weight="bold"),
+                                 text_color=TH.ACCENT)
+        total_lbl.pack(side="right")
+        price_e = ctk.CTkEntry(row, width=110, height=34, justify="right",
+                               font=ctk.CTkFont(size=F_BODY),
+                               fg_color=TH.PANEL, border_color=TH.BORDER)
+        price_e.pack(side="right", padx=8)
+        price_e.insert(0, f"{it['unit_price']:.2f}")
 
-    def _selected_index(self):
-        sel = self.items.selection()
-        if not sel:
-            return None
-        return self._index_of(sel[0])
-
-    # ── inline cell editing ─────────────────────────────────────────
-    def _kill_editor(self):
-        ed = self._cell_editor
-        self._cell_editor = None
-        if ed is not None:
-            try:
-                ed.destroy()
-            except Exception:
-                pass
-
-    def _on_item_click(self, event):
-        """A single click on the ✕ column removes that line."""
-        if self.items.identify_column(event.x) != COL_DELETE:
-            return
-        iid = self.items.identify_row(event.y)
-        if not iid:
-            return
-        idx = self._index_of(iid)
-        if idx is not None:
-            self._remove(idx)
-        return "break"
-
-    def _on_item_double(self, event):
-        """Double-clicking Qty or Rate edits it right there in the table."""
-        iid = self.items.identify_row(event.y)
-        col = self.items.identify_column(event.x)
-        if not iid:
-            return "break"
-        idx = self._index_of(iid)
-        if idx is None:
-            return "break"
-        if col not in (COL_QTY, COL_RATE):
-            self._edit_line(idx)
-            return "break"
-
-        it = self.cart[idx]
-        if col == COL_QTY and it["mobile_unit_id"]:
-            self.toast("An IMEI handset is always quantity 1.", "warn")
-            return "break"
-
-        bbox = self.items.bbox(iid, col)
-        if not bbox:
-            return "break"
-        x, y, w, h = bbox
-        self._open_cell_editor(idx, col, x, y, w, h)
-        return "break"
-
-    def _open_cell_editor(self, idx, col, x, y, w, h):
-        """Float an entry over the cell so it is edited in place."""
-        if idx >= len(self.cart):
-            return None
-        it = self.cart[idx]
-        self._kill_editor()
-
-        current = (str(it["quantity"]) if col == COL_QTY
-                   else f"{it['unit_price']:.2f}")
-        # CustomTkinter requires width/height on the CONSTRUCTOR — passing them
-        # to place() raises "'width' and 'height' arguments must be passed to
-        # the constructor of the widget, not the place method".
-        ed = ctk.CTkEntry(self.items, width=max(int(w), 40),
-                          height=max(int(h), 24),
-                          font=ctk.CTkFont(size=F_BODY),
-                          justify="center" if col == COL_QTY else "right",
-                          fg_color=TH.PANEL_ALT, border_color=TH.ACCENT,
-                          border_width=2)
-        ed.place(x=int(x), y=int(y))
-        ed.insert(0, current)
-        try:
-            ed.select_range(0, "end")
-        except Exception:
-            pass
-        ed.focus_set()
-        self._cell_editor = ed
-
-        def commit(_e=None):
-            # read the value BEFORE the widget goes away
-            if getattr(ed, "_done", False):
-                return
-            ed._done = True
-            raw = ed.get()
-            self._kill_editor()
-            self._apply_cell(idx, col, raw)
-
-        def cancel(_e=None):
-            ed._done = True
-            self._kill_editor()
-
-        ed._commit = commit
-        ed._cancel = cancel
-        ed.bind("<Return>", commit)
-        ed.bind("<KP_Enter>", commit)
-        ed.bind("<FocusOut>", commit)
-        ed.bind("<Escape>", cancel)
-        return ed
-
-    def _apply_cell(self, idx, col, raw):
-        if idx >= len(self.cart):
-            return
-        it = self.cart[idx]
-        if col == COL_QTY:
-            qty = max(parse_int(raw, it["quantity"]), 1)
-            stock = self._stock_for(it)
-            if stock is not None and qty > stock:
-                qty = max(int(stock), 1)
-                self.toast(f"Only {stock} of {it['name']} in stock.", "warn")
-            it["quantity"] = qty
+        serialized = bool(it["mobile_unit_id"])
+        step = ctk.CTkFrame(row, fg_color="transparent")
+        step.pack(side="right", padx=(8, 0))
+        qty_e = ctk.CTkEntry(step, width=48, height=34, justify="center",
+                             font=ctk.CTkFont(size=F_BODY),
+                             fg_color=TH.PANEL, border_color=TH.BORDER)
+        if serialized:
+            qty_e.insert(0, "1")
+            qty_e.configure(state="disabled")
+            qty_e.pack(side="left")
         else:
-            price = parse_amount(raw, it["unit_price"])
-            it["unit_price"] = max(price, 0.0)
+            ctk.CTkButton(step, text="−", width=30, height=34,
+                          fg_color=TH.MUTED, hover_color=TH.MUTED_HV,
+                          font=ctk.CTkFont(size=F_LBL, weight="bold"),
+                          command=lambda i=idx: self._step(i, -1)).pack(
+                              side="left")
+            qty_e.pack(side="left", padx=3)
+            qty_e.insert(0, str(it["quantity"]))
+            ctk.CTkButton(step, text="+", width=30, height=34,
+                          fg_color=TH.NAVY, hover_color=TH.NAVY_HV,
+                          font=ctk.CTkFont(size=F_LBL, weight="bold"),
+                          command=lambda i=idx: self._step(i, 1)).pack(
+                              side="left")
+
+        # description fills whatever width is left over
+        info = ctk.CTkFrame(row, fg_color="transparent")
+        info.pack(side="left", fill="x", expand=True, padx=(8, 8))
+        head = " ".join(x for x in (it["brand"], it["name"]) if x)
+        if it["model"] and it["model"].lower() not in head.lower():
+            head += f" — {it['model']}"
+        top = ctk.CTkFrame(info, fg_color="transparent")
+        top.pack(fill="x")
+        ctk.CTkLabel(top, text=head, anchor="w",
+                     font=ctk.CTkFont(size=F_LBL, weight="bold"),
+                     text_color=TH.TEXT).pack(side="left")
+        ctk.CTkButton(top, text="✎", width=26, height=22,
+                      fg_color="transparent", hover_color=TH.SIDEBAR_HV,
+                      text_color=TH.INFO, font=ctk.CTkFont(size=F_SM),
+                      command=lambda i=idx: self._edit_line(i)).pack(
+                          side="left", padx=4)
+
+        meta = []
+        if it.get("quality"):
+            meta.append(it["quality"])
+        if it["imei"]:
+            meta.append(f"IMEI {it['imei']}")
+        summary = attrs_summary(unpack_attrs(it["attrs"]), limit=3)
+        if summary:
+            meta.append(summary)
+        if it["warranty_months"]:
+            meta.append(f"{it['warranty_months']}m warranty")
+        if it["plan"] == PLAN_INSTALLMENT:
+            meta.append(f"EMI x {it['months']}m")
+        if meta:
+            ctk.CTkLabel(info, text="   ·   ".join(meta), anchor="w",
+                         font=ctk.CTkFont(size=F_SM),
+                         text_color=TH.TEXT_DIM).pack(fill="x")
+
+        # Live update as they type. Deliberately NOT bound to <FocusOut> —
+        # that fires while the row is being destroyed and was the source of
+        # the "bad window path name" crash.
+        qty_e.bind("<KeyRelease>", lambda _e, i=idx: self._line_typed(i))
+        price_e.bind("<KeyRelease>", lambda _e, i=idx: self._line_typed(i))
+        qty_e.bind("<Return>", lambda _e, i=idx: self._line_typed(i))
+        price_e.bind("<Return>", lambda _e, i=idx: self._line_typed(i))
+
+        return {"qty": qty_e, "price": price_e, "total": total_lbl}
+
+    def _row_ui(self, idx):
+        """Widgets for a line, only if every one of them is still alive."""
+        if idx < 0 or idx >= len(self._rows_ui) or idx >= len(self.cart):
+            return None
+        ui_row = self._rows_ui[idx]
+        try:
+            for w in ui_row.values():
+                if not w.winfo_exists():
+                    return None
+        except Exception:
+            return None
+        return ui_row
+
+    def _line_typed(self, idx):
+        """Read this row's boxes and update the line + totals, in place."""
+        ui_row = self._row_ui(idx)
+        if not ui_row:
+            return
+        it = self.cart[idx]
+
+        if not it["mobile_unit_id"]:
+            raw = ui_row["qty"].get().strip()
+            if raw:
+                qty = max(parse_int(raw, it["quantity"]), 1)
+                stock = self._stock_for(it)
+                if stock is not None and qty > stock:
+                    qty = max(int(stock), 1)
+                    ui_row["qty"].delete(0, "end")
+                    ui_row["qty"].insert(0, str(qty))
+                    self.toast(f"Only {stock} of {it['name']} in stock.",
+                               "warn")
+                it["quantity"] = qty
+
+        raw_price = ui_row["price"].get().strip()
+        if raw_price not in ("", ".", "-"):
+            it["unit_price"] = max(
+                parse_amount(raw_price, it["unit_price"]), 0.0)
+
         it["total_price"] = money(it["quantity"] * it["unit_price"])
-        self._redraw_cart()
-        if idx < len(self._line_iids):
-            self.items.selection_set(self._line_iids[idx])
+        ui_row["total"].configure(text=f"{self.cur} {it['total_price']:,.2f}")
+        self._recalc()
+
+    def _step(self, idx, delta):
+        if idx >= len(self.cart):
+            return
+        it = self.cart[idx]
+        new_qty = it["quantity"] + delta
+        if new_qty < 1:
+            self._remove(idx)
+            return
+        stock = self._stock_for(it)
+        if stock is not None and new_qty > stock:
+            self.toast(f"Only {stock} of {it['name']} in stock.", "warn")
+            return
+        it["quantity"] = new_qty
+        it["total_price"] = money(new_qty * it["unit_price"])
+        ui_row = self._row_ui(idx)
+        if ui_row:
+            ui_row["qty"].delete(0, "end")
+            ui_row["qty"].insert(0, str(new_qty))
+            ui_row["total"].configure(
+                text=f"{self.cur} {it['total_price']:,.2f}")
+            self._recalc()
+        else:
+            self._redraw_cart()
 
     def _stock_for(self, it):
         if it.get("kind") == KIND_SERVICE:
@@ -767,32 +731,17 @@ class BillingPage(Page):
             "SELECT stock_quantity FROM products WHERE id=?",
             (it["product_id"],), 0))
 
-    # ── line actions ────────────────────────────────────────────────
-    def _remove_selected(self):
-        idx = self._selected_index()
-        if idx is None:
-            self.toast("Select a line on the bill first.", "warn")
-            return
-        self._remove(idx)
-
     def _remove(self, idx):
         if 0 <= idx < len(self.cart):
             self.cart.pop(idx)
             self._redraw_cart()
-
-    def _edit_selected_line(self):
-        idx = self._selected_index()
-        if idx is None:
-            self.toast("Select a line on the bill first.", "warn")
-            return
-        self._edit_line(idx)
 
     def _edit_line(self, idx):
         """Change what this line PRINTS — model, quality, warranty."""
         if idx >= len(self.cart):
             return
         it = self.cart[idx]
-        d = ui.modal(self.app, "Edit bill line", 540, 470)
+        d = ui.modal(self.app, "Edit bill line", 540, 460)
         ui.modal_header(d, it["name"], "These details print on the bill")
         body = ui.modal_body(d)
 
@@ -811,8 +760,8 @@ class BillingPage(Page):
                          font=ctk.CTkFont(size=F_SM, weight="bold"),
                          text_color=TH.ACCENT).pack(anchor="w", pady=(6, 0))
         ctk.CTkLabel(body,
-                     text="Tip: quantity and rate are changed by "
-                          "double-clicking them in the table.",
+                     text="Quantity and price are changed directly on the "
+                          "bill line.",
                      font=ctk.CTkFont(size=F_SM),
                      text_color=TH.TEXT_DIM).pack(anchor="w", pady=(8, 0))
 
@@ -1036,7 +985,6 @@ class BillingPage(Page):
     # SAVE
     # ══════════════════════════════════════════════════════════════
     def _save(self, action):
-        self._kill_editor()
         if not self.cart:
             self.warn("Empty bill", "Add at least one product first.")
             return

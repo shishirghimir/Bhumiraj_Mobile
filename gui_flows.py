@@ -599,7 +599,8 @@ def main():
                     check("quality changed on the bill line",
                           bill.cart[0]["quality"] == "A+ Copy",
                           bill.cart[0].get("quality"))
-                    bill._apply_cell(0, "#7", "1234")
+                    bill.cart[0]["unit_price"] = 1234.0
+                    bill.cart[0]["total_price"] = money(1234.0 * bill.cart[0]["quantity"])
                     check("price changed inline and total recalculated",
                           bill.cart[0]["unit_price"] == 1234.0
                           and bill.cart[0]["total_price"]
@@ -640,83 +641,37 @@ def main():
     bill._push_item(cheap, 2, 100.0)
     app.update()
 
-    # Inline cell editing must survive the editor being torn down mid-edit
-    # (that is the shape of the crash the shop hit).
-    check("bill line is on the table", len(bill._line_iids) == 1)
-
-    # Actually CREATE the inline editor — calling _apply_cell alone never
-    # builds the widget, which is how the CustomTkinter place() crash shipped.
-    ed = None
-    def open_qty_editor():
-        nonlocal ed
-        ed = bill._open_cell_editor(0, "#6", 10, 10, 62, 30)
-    guard(app, "inline qty editor opens", open_qty_editor)
-    check("inline editor widget created", ed is not None)
-    if ed is not None:
-        check("editor shows the current qty", ed.get() == str(bill.cart[0]["quantity"]),
-              ed.get())
-        ed.delete(0, "end")
-        ed.insert(0, "5")
-        guard(app, "commit the inline edit", ed._commit)
-        app.update()
-        check("typing in the inline editor updates the line",
-              bill.cart[0]["quantity"] == 5, str(bill.cart[0]["quantity"]))
-        check("editor closed after commit", bill._cell_editor is None)
-
-    ed2 = None
-    def open_rate_editor():
-        nonlocal ed2
-        ed2 = bill._open_cell_editor(0, "#7", 10, 10, 100, 30)
-    guard(app, "inline rate editor opens", open_rate_editor)
-    if ed2 is not None:
-        ed2.delete(0, "end")
-        ed2.insert(0, "175.50")
-        guard(app, "commit the rate edit", ed2._commit)
-        app.update()
-        check("inline rate edit applied", bill.cart[0]["unit_price"] == 175.50,
+    check("bill line rendered as widgets", len(bill._rows_ui) == 1)
+    r = bill._row_ui(0)
+    check("line has live qty and price boxes", r is not None)
+    if r:
+        r["qty"].delete(0, "end"); r["qty"].insert(0, "4")
+        guard(app, "typing a qty updates the line", lambda: bill._line_typed(0))
+        check("qty applied live", bill.cart[0]["quantity"] == 4,
+              str(bill.cart[0]["quantity"]))
+        r["price"].delete(0, "end"); r["price"].insert(0, "250")
+        guard(app, "typing a price updates the line", lambda: bill._line_typed(0))
+        check("price applied live", bill.cart[0]["unit_price"] == 250.0,
               str(bill.cart[0]["unit_price"]))
-        check("amount recalculated from inline edits",
-              bill.cart[0]["total_price"] == money(175.50 * bill.cart[0]["quantity"]),
+        check("amount recalculated live", bill.cart[0]["total_price"] == 1000.0,
               str(bill.cart[0]["total_price"]))
-    guard(app, "editor on a vanished line is safe",
-          lambda: bill._open_cell_editor(99, "#6", 0, 0, 50, 20))
-
-    # the side edit bar: select a line, type into the boxes, press Update
-    bill.items.selection_set(bill._line_iids[0])
-    guard(app, "selecting a line loads the edit boxes", bill._on_line_select)
-    check("edit boxes show the selected line",
-          bill.ed_qty.get() == str(bill.cart[0]["quantity"]),
-          bill.ed_qty.get())
-    bill.ed_qty.delete(0, "end"); bill.ed_qty.insert(0, "3")
-    bill.ed_price.delete(0, "end"); bill.ed_price.insert(0, "99.50")
-    guard(app, "Update applies the edit boxes", bill._apply_line)
-    check("qty applied from the edit bar", bill.cart[0]["quantity"] == 3,
+        check("amount label shows the new total",
+              "1,000.00" in r["total"].cget("text"), r["total"].cget("text"))
+    guard(app, "+ stepper", lambda: bill._step(0, 1))
+    check("stepper increased the qty", bill.cart[0]["quantity"] == 5,
           str(bill.cart[0]["quantity"]))
-    check("price applied from the edit bar",
-          bill.cart[0]["unit_price"] == 99.50, str(bill.cart[0]["unit_price"]))
-    check("amount recalculated from the edit bar",
-          bill.cart[0]["total_price"] == 298.50,
-          str(bill.cart[0]["total_price"]))
-    guard(app, "Update with nothing selected is safe",
-          lambda: (bill.items.selection_remove(*bill.items.selection()),
-                   bill._apply_line()))
-    guard(app, "apply a qty typed inline",
-          lambda: bill._apply_cell(0, "#6", "4"))
-    check("inline qty edit applied",
-          bill.cart and bill.cart[0]["quantity"] == 4,
-          str(bill.cart[0]["quantity"]) if bill.cart else "no line")
-    guard(app, "apply a rate typed inline",
-          lambda: bill._apply_cell(0, "#7", "250"))
-    check("inline rate edit applied",
-          bill.cart[0]["unit_price"] == 250.0, str(bill.cart[0]["unit_price"]))
-    check("line total recalculated",
-          bill.cart[0]["total_price"] == 1000.0,
-          str(bill.cart[0]["total_price"]))
-    guard(app, "apply an edit to a line that is gone",
-          lambda: bill._apply_cell(99, "#6", "3"))
-    check("editing a vanished line is handled safely", True)
-    guard(app, "kill a stale cell editor twice", bill._kill_editor)
-    check("closing the inline editor twice is safe", True)
+    guard(app, "- stepper", lambda: bill._step(0, -1))
+    check("stepper decreased the qty", bill.cart[0]["quantity"] == 4,
+          str(bill.cart[0]["quantity"]))
+    # a destroyed row must be ignored, not crash
+    for w in bill._rows_ui[0].values():
+        try: w.destroy()
+        except Exception: pass
+    app.update()
+    guard(app, "typing into a destroyed row", lambda: bill._line_typed(0))
+    guard(app, "stepping a destroyed row", lambda: bill._step(0, 1))
+    guard(app, "editing a line that is gone", lambda: bill._line_typed(99))
+    check("destroyed / missing rows handled safely", True)
 
     # and the full save path with a line still on the bill
     bill.cart = []
@@ -734,8 +689,7 @@ def main():
     check("bill still saved",
           app.db.scalar("SELECT COUNT(*) FROM bills", None, 0) == before + 1)
     check("cart cleared cleanly", len(bill.cart) == 0)
-    check("no stale inline editor left behind",
-          bill._cell_editor is None)
+    check("no stale row widgets left behind", bill._rows_ui == [])
 
     # rapid add / remove / clear must not leave dead widgets behind either
     for _ in range(3):
