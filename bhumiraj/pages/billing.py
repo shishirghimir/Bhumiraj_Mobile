@@ -538,11 +538,20 @@ class BillingPage(Page):
     # ══════════════════════════════════════════════════════════════
     def _redraw_cart(self):
         """Rebuild every bill line as real, directly-editable widgets."""
+        # Move keyboard focus OFF the rows BEFORE destroying them. Tk can have
+        # a focus callback already queued against a row entry; if that fires
+        # once the widget is gone it raises "bad window path name". Parking the
+        # caret in the search box is also what the counter wants next anyway.
+        self._park_focus()
+
         # Clear the widget map BEFORE destroying, so any callback that fires
         # during teardown cannot reach a half-destroyed row.
         self._rows_ui = []
         for w in self.lines_box.winfo_children():
-            w.destroy()
+            try:
+                w.destroy()
+            except Exception:
+                pass
 
         if not self.cart:
             ctk.CTkLabel(self.lines_box,
@@ -655,6 +664,27 @@ class BillingPage(Page):
         price_e.bind("<Return>", lambda _e, i=idx: self._line_typed(i))
 
         return {"qty": qty_e, "price": price_e, "total": total_lbl}
+
+    def _park_focus(self):
+        """If the caret is inside a bill line, move it to the search box.
+
+        Anything still focused inside `lines_box` is about to be destroyed, and
+        a queued focus callback aimed at it would raise once it is gone.
+        """
+        try:
+            focused = self.focus_get()
+        except Exception:
+            focused = None
+        try:
+            inside = (focused is not None
+                      and str(focused).startswith(str(self.lines_box)))
+        except Exception:
+            inside = False
+        if inside or focused is None:
+            try:
+                self.search_entry.focus_set()
+            except Exception:
+                pass
 
     def _row_ui(self, idx):
         """Widgets for a line, only if every one of them is still alive."""
@@ -985,6 +1015,12 @@ class BillingPage(Page):
     # SAVE
     # ══════════════════════════════════════════════════════════════
     def _save(self, action):
+        # Park the caret BEFORE any dialog opens. CTkToplevel withdraws and
+        # re-shows itself for titlebar colouring, remembers whichever widget
+        # had focus and schedules `after(10, that_widget.focus)`. If the caret
+        # was in a bill line, that line is destroyed when the cart is cleared
+        # and the restore then fires at a dead widget.
+        self._park_focus()
         if not self.cart:
             self.warn("Empty bill", "Add at least one product first.")
             return

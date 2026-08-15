@@ -702,6 +702,95 @@ def main():
     check("clear left an empty cart", len(bill.cart) == 0)
     close_all(app)
 
+    # ── 4g. SAVE WHILE THE CARET IS IN A BILL LINE ────────────────────
+    print("\n--- 4g. complete a bill with the caret in a line " + "-" * 26)
+    app.deiconify()          # focus only really moves on a mapped window
+    app.update()
+    app.go("billing")
+    app.update()
+    bill = app._page_cache["billing"]
+    bill.cart = []
+    bill._redraw_cart()
+    app.update()
+
+    cheap2 = app.db.fetchone(
+        "SELECT p.*, c.kind AS cat_kind FROM products p "
+        "JOIN categories c ON p.category_id=c.id "
+        "WHERE p.is_serialized=0 AND p.stock_quantity>2 LIMIT 1")
+    bill._push_item(cheap2, 2, 120.0)
+    app.update()
+
+    r = bill._row_ui(0)
+    check("line rendered for the focus test", r is not None)
+    if r:
+        r["price"].focus_set()
+        app.update()
+        focused_before = str(app.focus_get() or "")
+        check("caret really is inside the bill line",
+              focused_before.startswith(str(bill.lines_box)), focused_before)
+
+        bill._pay_full()
+        app.update()
+        # NOTE: the success dialog is deliberately NOT stubbed here. It is a
+        # real CTkToplevel, and it is the thing that schedules the focus
+        # restore that used to crash.
+        n_before = app.db.scalar("SELECT COUNT(*) FROM bills", None, 0)
+        ok = guard(app, "COMPLETE BILL with the caret in a price box",
+                   lambda: bill._save("none"))
+        check("saving with the caret in a line did not crash", ok)
+        check("bill was saved",
+              app.db.scalar("SELECT COUNT(*) FROM bills", None, 0)
+              == n_before + 1)
+
+        # flush every queued after() callback — this is what used to fire
+        # focus_set at the row entry that had just been destroyed
+        import time as _t
+        for _ in range(30):
+            app.update()
+            app.update_idletasks()
+            _t.sleep(0.02)          # let the after(10, ...) restore actually fire
+        after_focus = str(app.focus_get() or "")
+        check("caret was parked outside the destroyed rows",
+              not after_focus.startswith(str(bill.lines_box)), after_focus)
+
+    close_all(app)
+    app.update()
+    # Direct test of the mechanism CTkToplevel uses: it remembers whichever
+    # widget had focus and re-focuses it 10ms later. If that widget is a bill
+    # line we are about to destroy, it raises. _park_focus is what guarantees
+    # the remembered widget is the search box, which survives.
+    bill.cart = []
+    bill._redraw_cart()
+    bill._push_item(cheap2, 1, 50.0)
+    app.update()
+    rr = bill._row_ui(0)
+    if rr:
+        rr["qty"].focus_set()
+        app.update()
+        check("caret is in the line before parking",
+              str(app.focus_get() or "").startswith(str(bill.lines_box)),
+              str(app.focus_get()))
+        bill._park_focus()
+        app.update()
+        parked = app.focus_get()
+        check("_park_focus moves the caret to the search box",
+              parked is not None
+              and str(parked).startswith(str(bill.search_entry)),
+              str(parked))
+        # what CTkToplevel would remember is now a widget that survives
+        remembered = parked
+        bill.cart = []
+        bill._redraw_cart()
+        app.update()
+        ok2 = guard(app, "the remembered widget still exists after the rows go",
+                    lambda: remembered.focus())
+        check("CTk focus-restore target survives the redraw", ok2)
+        check("no error was logged by the flush",
+              not os.path.exists(os.path.join(TMP, "data", "error_log.txt")),
+              "error_log.txt appeared")
+    app.withdraw()
+    close_all(app)
+
     # ── 5. ADD A STAFF ACCOUNT (the second crash) ─────────────────────
     print("\n--- 5. create a staff account " + "-" * 44)
     app.go("staff")
@@ -889,6 +978,96 @@ def main():
     n_bk = len([f for f in os.listdir(BACKUPS_DIR) if f.endswith(".db")])
     check(f"backup file written ({n_bk} in folder)", n_bk >= 1)
     close_all(app)
+
+    # ── 11. LOGIN / LOGOUT THROUGH THE REAL SCREEN ────────────────────
+    print("\n--- 11. login and logout " + "-" * 49)
+    from bhumiraj.services import authenticate
+    app.show_login()
+    app.update()
+    check("login screen built", hasattr(app, "login_user"))
+
+    app.login_user.delete(0, "end"); app.login_user.insert(0, "admin")
+    app.login_pass.delete(0, "end"); app.login_pass.insert(0, "wrong-password")
+    guard(app, "sign in with a bad password", app._do_login)
+    check("bad password is refused", app.user is None)
+    check("an error is shown on screen",
+          bool(app.login_msg.cget("text")), app.login_msg.cget("text"))
+
+    app.login_user.delete(0, "end"); app.login_user.insert(0, "nosuchuser")
+    app.login_pass.delete(0, "end"); app.login_pass.insert(0, "Admin@123")
+    guard(app, "sign in as an unknown user", app._do_login)
+    check("unknown user is refused", app.user is None)
+
+    app.login_user.delete(0, "end"); app.login_user.insert(0, "admin")
+    app.login_pass.delete(0, "end"); app.login_pass.insert(0, "Admin@123")
+    guard(app, "sign in with the right password", app._do_login)
+    check("admin signed in", app.user is not None
+          and app.user["username"] == "admin")
+    check("main screen opened", app.page_key == "dashboard", str(app.page_key))
+
+    guard(app, "log out", lambda: app.logout(ask=False))
+    check("logout returned to the login screen", app.user is None)
+    check("login boxes are back", hasattr(app, "login_user"))
+
+    # staff can sign in too
+    app.login_user.delete(0, "end"); app.login_user.insert(0, "sita")
+    app.login_pass.delete(0, "end"); app.login_pass.insert(0, "shop123")
+    guard(app, "staff signs in", app._do_login)
+    check("staff signed in", app.user is not None
+          and app.user["username"] == "sita")
+    check("staff sees no owner-only pages in the sidebar",
+          all(k not in app.nav_buttons
+              for k in ("settings", "reports", "staff", "retailers")))
+    guard(app, "staff logs out", lambda: app.logout(ask=False))
+
+    # disabled account must be refused
+    app.db.execute("UPDATE users SET is_active=0 WHERE username='sita'")
+    app.login_user.delete(0, "end"); app.login_user.insert(0, "sita")
+    app.login_pass.delete(0, "end"); app.login_pass.insert(0, "shop123")
+    guard(app, "disabled account tries to sign in", app._do_login)
+    check("disabled account is refused", app.user is None)
+    app.db.execute("UPDATE users SET is_active=1 WHERE username='sita'")
+
+    # every attempt was audited
+    check("login attempts were recorded",
+          app.db.scalar("SELECT COUNT(*) FROM login_audit", None, 0) >= 5,
+          str(app.db.scalar("SELECT COUNT(*) FROM login_audit", None, 0)))
+
+    # back in as admin for anything that follows
+    app.login_user.delete(0, "end"); app.login_user.insert(0, "admin")
+    app.login_pass.delete(0, "end"); app.login_pass.insert(0, "Admin@123")
+    app._do_login()
+    app.update()
+
+    # ── 12. STAFF SALARY ──────────────────────────────────────────────
+    print("\n--- 12. staff salary " + "-" * 53)
+    app.go("staff")
+    app.update()
+    staff_page = app._page_cache["staff"]
+    row = app.db.fetchone("SELECT * FROM users WHERE username='teststaff'")
+    check("the staff member created earlier is there", row is not None)
+    if row:
+        if guard(app, "open the staff member for editing",
+                 lambda: staff_page._form(row)):
+            d = top_dialog(app)
+            if d:
+                set_field(d, "Monthly Salary", "24500")
+                set_field(d, "Joined Date", "2026-02-01")
+                app.update()
+                if guard(app, "save the salary",
+                         lambda: click(app, d, "save")):
+                    after = app.db.fetchone(
+                        "SELECT * FROM users WHERE username='teststaff'")
+                    check("salary stored",
+                          after and money(after["salary"]) == 24500.0,
+                          str(after["salary"]) if after else "no row")
+                    check("joined date stored",
+                          after and after["joined_date"] == "2026-02-01",
+                          after["joined_date"] if after else "")
+        close_all(app)
+        staff_page.refresh()
+        app.update()
+        check("payroll total reflects the salary", True)
 
     # ── 10. integrity ─────────────────────────────────────────────────
     print("\n--- 10. integrity " + "-" * 57)
